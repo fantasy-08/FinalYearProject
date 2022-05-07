@@ -1,0 +1,2 @@
+model_checkpoint_path: "c:\\Users\\ajeya\\Desktop\\gesture\\TrainedModel\\GestureRecogModel.tfl"
+all_model_checkpoint_paths: "c:\\Users\\ajeya\\Desktop\\gesture\\TrainedModel\\GestureRecogModel.tfl"
