@@ -12,8 +12,31 @@ import mediapipe as mp
 import pandas as pd
 import keyboard
 import math
+from ctypes import cast, POINTER
+from comtypes import CLSCTX_ALL
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+# keypress
+import pyautogui
 
 bg = None
+
+# Setup Core Audio Windows Library
+devices = AudioUtilities.GetSpeakers()
+interface = devices.Activate(
+    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+volume = cast(interface, POINTER(IAudioEndpointVolume))
+
+# volume.GetMute()
+# volume.GetMasterVolumeLevel()
+volumeRange = volume.GetVolumeRange()
+
+minVolume = volumeRange[0]
+maxVolume = volumeRange[1]
+
+# time to save 
+gesture_count = 0
+gesture_number = -1
 
 def resizeImage(imageName):
     basewidth = 100
@@ -171,7 +194,8 @@ class HandDetector():
         return resolutions
 
     def displayResolution(self, img, resolutions, WIDTH, HEIGHT):
-        cv2.putText(img, "Res: " + str(list(resolutions)[-1]), (int(WIDTH - 520) , 50), cv2.FONT_HERSHEY_PLAIN, 3, (255, 255, 255), 2)
+        # cv2.putText(img, "Res: " + str(list(resolutions)[-1]), (int(WIDTH - 520) , 50), cv2.FONT_HERSHEY_PLAIN, 3, (255, 255, 255), 2)
+        pass
 
 def main():
     # initialize weight for running average
@@ -181,10 +205,16 @@ def main():
 
     camera = cv2.VideoCapture(0)
     
-    hand_detector = HandDetector()
+    hand_detector = HandDetector(detectionConfidence = 0.8)
     WIDTH = camera.get(cv2.CAP_PROP_FRAME_WIDTH)
     HEIGHT = camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
     resolutions = [WIDTH, HEIGHT]
+
+    # Volume variables
+    vol = 0
+    volBar = 400
+    volPer = 0
+    boundingBoxArea = 0
 
     top, right, bottom, left = 10, 350, 225, 590
 
@@ -197,15 +227,47 @@ def main():
         # get the current frame
         (grabbed, frame) = camera.read()
 
-        img = frame
+        clone2 = frame.copy()
+        img = clone2
 
         img = hand_detector.locateHands(img)
-        landMarkList  = hand_detector.locatePosition(img)
+        landMarkList, boundingBox  = hand_detector.locatePosition(img)
 
-        if len(landMarkList ) != 0:
-            pass
-        prevTime, currTime = hand_detector.fps(img, prevTime, currTime, WIDTH, HEIGHT)
-        hand_detector.displayResolution(img, resolutions, WIDTH, HEIGHT)
+        if len(landMarkList ) > 0:
+            
+        # prevTime, currTime = hand_detector.fps(img, prevTime, currTime, WIDTH, HEIGHT)
+        # hand_detector.displayResolution(img, resolutions, WIDTH, HEIGHT)
+            boundingBoxArea = (boundingBox[2] - boundingBox[0]) * (boundingBox[3] - boundingBox[1]) // 100
+            if boundingBoxArea > 100 and boundingBoxArea < 500:
+
+                # Distance between index and thumb
+                length, img, lineDetails = hand_detector.calculateDistance(4, 8, img)
+                # print(length)
+
+                # Convert Volume 
+                # vol = np.interp(length, [20, 200], [minVolume, maxVolume])
+                volBar = np.interp(length, [50, 300], [400, 150])
+                volPer = np.interp(length, [50, 300], [0, 100])
+
+                # Makes Bar smooth
+                smoothness = 10
+                volPer = smoothness * round(volPer / smoothness)
+
+                # Detect Fingers up
+                fingers = hand_detector.fingersUp()
+                # print(fingers)
+
+                # Detect if Ring Finger is up
+                if not fingers[4]:
+                    volume.SetMasterVolumeLevelScalar(volPer / 100, None)
+                    cv2.circle(img, (lineDetails[4], lineDetails[5]), 15, (0, 255, 0), cv2.FILLED)
+                    colorVol = (0, 255, 0)
+                else:
+                    colorVol = (255, 0, 0)
+            cv2.rectangle(img, (50, 150), (85, 400), (255, 0, 0), 3)
+            cv2.rectangle(img, (50, int(volBar)), (85, 400), (255, 0, 0), cv2.FILLED)
+            cv2.putText(img, f'{int(volPer)} %', (40, 450), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 0, 0), 3) 
+            cVol = int(volume.GetMasterVolumeLevelScalar() * 100)
 
         '''
             Hand gesture detector
@@ -224,10 +286,9 @@ def main():
         gray = cv2.GaussianBlur(gray, (7, 7), 0)
 
         if num_frames < 30:
-            print("Capturing background")
+            print("Capturing background frame = " + str(num_frames+1))
             run_avg(gray, aWeight)
         else:
-            print("Start testing")
             hand = segment(gray)
 
             if hand is not None:
@@ -245,21 +306,35 @@ def main():
 
         num_frames += 1
 
-        cv2.imshow("Video Feed", clone)
-
         keypress = cv2.waitKey(1) & 0xFF
 
         if keypress == ord("q"):
             break
-        
+
         if keypress == ord("s"):
             start_recording = True
+
+        cv2.imshow("Video Feed - Volume Gesture", clone2)
+        cv2.imshow("Video Feed", clone)
 
 def getPredictedClass():
     image = cv2.imread('Temp.png')
     gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     prediction = model.predict([gray_image.reshape(89, 100, 1)])
     return np.argmax(prediction), (np.amax(prediction) / (prediction[0][0] + prediction[0][1] + prediction[0][2] + prediction[0][3] + prediction[0][4] + prediction[0][5]))
+
+def changeGestureCount(number):
+    global gesture_count
+    global gesture_number
+
+    if gesture_number != number:
+        gesture_count = 1
+        gesture_number = number
+        return False
+    gesture_count += 1
+    if gesture_count >= 2000:
+        return True
+    return False
 
 def showStatistics(predictedClass, confidence):
 
@@ -268,21 +343,34 @@ def showStatistics(predictedClass, confidence):
 
     if predictedClass == 0:
         className = "Swing"
+        if changeGestureCount(0):
+            pass
     elif predictedClass == 1:
         className = "Palm"
+        if changeGestureCount(1):
+            pyautogui.press('playpause')
     elif predictedClass == 2:
         className = "Fist"
+        if changeGestureCount(2):
+            pass
     elif predictedClass == 3:
         className = "Thumb"
+        if changeGestureCount(3):
+            pass
     elif predictedClass == 4:
+        if changeGestureCount(4):
+            pyautogui.press('nexttrack')
         className = "Right Indicator"
     elif predictedClass == 5:
+        if changeGestureCount(5):
+            pyautogui.press('prevtrack')
         className = "Left Indicator"
 
     confidence_percentage = confidence * 100
 
     if (confidence_percentage < 98):
         className = "Nothing"
+        confidence_percentage = 0
 
     cv2.putText(textImage,"Pedicted Class : " + className, 
         (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2
