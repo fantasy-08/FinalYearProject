@@ -332,7 +332,10 @@ def changeGestureCount(number):
         gesture_number = number
         return False
     gesture_count += 1
-    if gesture_count >= 2000:
+    if gesture_count >= 50:
+        gesture_count = 0
+        gesture_number = -1
+        print("exectute")
         return True
     return False
 
