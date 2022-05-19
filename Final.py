@@ -205,7 +205,7 @@ def main():
 
     camera = cv2.VideoCapture(0)
     
-    hand_detector = HandDetector(detectionConfidence = 0.8)
+    hand_detector = HandDetector(detectionConfidence = 0.7)
     WIDTH = camera.get(cv2.CAP_PROP_FRAME_WIDTH)
     HEIGHT = camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
     resolutions = [WIDTH, HEIGHT]
